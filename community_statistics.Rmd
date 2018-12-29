@@ -1,0 +1,4289 @@
+---
+title: "TeX - LaTeX community statistics"
+author: "Werner Grundlingh"
+date: "`r paste0(weekdays(Sys.time()), ', ', format.Date(Sys.time(), '%d %B, %Y'))`" # today
+output:
+  html_document:
+    df_print: paged
+    fig_width: 9.5
+---
+
+```{r Setup, include = FALSE}
+
+# Package loading ####
+library(tidyverse)
+library(plotly)
+library(lubridate)
+library(zoo)
+#library(tictoc)
+library(kableExtra) # For awesome-looking HTML tables
+library(formattable) # ...more awesome HTML table formatting
+
+# Base variables ####
+current_year <- 2018
+base_folder <- '~/Research/LaTeX/tex.sx'
+
+meta_site <- FALSE # TRUE > Download/process content from meta site.
+                   # FALSE > Download/process content from main site.
+download_data <- FALSE # TRUE > Download data and process it
+                       # FALSE > Process already-downloaded data
+
+colour <- list() # Initialise colour list
+colour$question <- 'blue'
+colour$question_downvote <- rgb(128/255, 128/255, 255/255)
+colour$answer <- 'orange'
+colour$answer_downvote <- rgb(255/255, 228/255, 179/255)
+colour$participation <- 'gray'
+colour$moderation <- 'gold'
+colour$other <- 'green'
+colour$tag <- 'purple'
+colour$user <- 'red'
+colour$gold <- rgb(255/255, 204/255, 0/255) # GOLD
+colour$silver <- rgb(197/255, 197/255, 197/255) # SILVER
+colour$bronze <- rgb(204/255, 153/255, 102/255) # BRONZE
+colour$weekday <- 'blue'
+colour$weekend <- 'green'
+
+colour$orange <- rgb(255/255, 165/255, 0/255) # ORANGE
+colour$red <- rgb(255/255, 0/255, 0/255) # RED
+colour$green <- rgb(0/255, 255/255, 0/255) # GREEN
+colour$blue <- rgb(0/255, 0/255, 255/255) # BLUE
+colour$black <- rgb(0/255, 0/255, 0/255) # BLACK
+colour$white <- rgb(255/255, 255/255, 255/255) # WHITE
+
+mix_colour <- function(mix = 1, colour1, colour2) {
+  return(
+    rgb(
+      (mix * as.numeric(paste0('0x', str_sub(colour1, 2, 3))) +
+         (1 - mix) * as.numeric(paste0('0x', str_sub(colour2, 2, 3)))) / 255,
+      (mix * as.numeric(paste0('0x', str_sub(colour1, 4, 5))) +
+         (1 - mix) * as.numeric(paste0('0x', str_sub(colour2, 4, 5)))) / 255,
+      (mix * as.numeric(paste0('0x', str_sub(colour1, 6, 7))) +
+         (1 - mix) * as.numeric(paste0('0x', str_sub(colour2, 6, 7)))) / 255
+    )
+  )
+}
+
+colour$top_5_1 <- mix_colour(mix = 1, colour1 = colour$orange, colour2 = colour$green)
+colour$top_5_2 <- mix_colour(mix = 0.75, colour1 = colour$orange, colour2 = colour$green)
+colour$top_5_3 <- mix_colour(mix = 0.5, colour1 = colour$orange, colour2 = colour$green)
+colour$top_5_4 <- mix_colour(mix = 0.25, colour1 = colour$orange, colour2 = colour$green)
+colour$top_5_5 <- mix_colour(mix = 0, colour1 = colour$orange, colour2 = colour$green)
+
+colour$close_votes <- rgb(239/255, 71/255, 96/255)
+colour$reopen_votes <- rgb(255/255, 209/255, 97/255)
+colour$low_quality_posts <- rgb(6/255, 201/255, 143/255)
+colour$suggested_edits <- rgb(47/255, 139/255, 160/255)
+colour$first_posts <- rgb(132/255, 95/255, 128/255)
+colour$late_answers <- rgb(238/255, 133/255, 16/255)
+
+# HTML-specific encodings
+URL <- list() # Initialise URL list
+URL$comma <- URLencode(',', reserved = TRUE)
+URL$plus <- URLencode('+', reserved = TRUE)
+
+# Create lookup table for sorting days of week
+day_of_week <- data.frame(
+  Number = 1:7,
+  Weekday = c('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'),
+  Wkday = c('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'),
+  Wkd = c('Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'),
+  Wd = c('M', 'T', 'W', 'T', 'F', 'S', 'S'),
+  WeekdayType = c(rep('Weekday', 5), rep('Weekend', 2)),
+  stringsAsFactors = FALSE
+)
+
+month_names <- data.frame(
+  Number = 1:12,
+  Month = c('January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December'),
+  Mon = c('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'),
+  M = c('J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'),
+  stringsAsFactors = FALSE
+)
+
+year_stats <- data.frame(
+  Date = seq(
+    from = '20080101' %>% ymd(),
+    to = paste0(current_year, '1231') %>% ymd(),
+    by = 'year'
+  ) %>% floor_date(
+    unit = 'year'
+  )
+) %>% left_join(
+  data.frame(
+    Day = seq(
+      from = '20080101' %>% ymd(),
+      to = paste0(current_year, '1231') %>% ymd(),
+      by = 'day'
+    )
+  ) %>% mutate(
+    n = 1,
+    Date = Day %>% floor_date(
+      unit = 'year'
+    ),
+    Weekday = Day %>% weekdays()
+  ) %>% mutate(
+    Weekdays = if_else(
+      Weekday %in% day_of_week$Weekday[
+        day_of_week$WeekdayType == 'Weekday'
+      ],
+      1,
+      0
+    ),
+    Weekends = (Weekdays + 1) %% 2
+  ),
+  by = 'Date'
+) %>% group_by(
+  Date
+) %>% summarise(
+  Days = n %>% sum(),
+  Weekdays = Weekdays %>% sum(),
+  Weekends = Weekends %>% sum()
+) %>% ungroup()
+
+# Regular (non-tag) badges by category
+badge_types <- read_csv(
+  file = paste0(
+    base_folder,
+    '/Data/badge_types.csv'
+  ),
+  progress = FALSE
+)
+
+site_select <- if (meta_site) 'meta.tex' else 'tex'
+
+
+download_entire_database <- function(
+  database,
+  ...
+) {
+  
+  downloaded_data <- NULL
+  
+  if (download_data) {
+    
+    downloaded_data <- read_csv(
+      file = paste0(
+        'https://data.stackexchange.com/',
+        site_select,
+        '/csv/1176238?',
+        'Database=', database
+      ),
+      progress = FALSE,
+      ...
+    )
+    
+    # Write data to file, for offline usage
+    downloaded_data %>% write_csv(
+      path = paste0(
+        base_folder,
+        '/Data/',
+        site_select,
+        '_', tolower(database), '.csv'
+      ),
+      na = ''
+    )
+    
+  } else { # !download_data
+    
+    downloaded_data <- read_csv(
+      file = paste0(
+        base_folder,
+        '/Data/',
+        site_select,
+        '_', tolower(database), '.csv'
+      ),
+      progress = FALSE,
+      ...
+    )
+    
+  }
+  
+  return (downloaded_data)
+  
+}
+
+download_database <- function(
+  database, 
+  datefield = 'CreationDate', 
+  from = NULL, 
+  to = NULL,
+  ...
+) {
+  
+  downloaded_data <- NULL
+  
+  if (download_data) {
+
+    if (is.null(from) & is.null(to)) {
+      # User did not specify any range
+
+      # Web:
+      # https://data.stackexchange.com/tex/query/951894/retrieve-database-details?DateField=.&Datebase=.
+      # CSV:
+      # https://data.stackexchange.com/tex/csv/1180634?DateField=.&Datebase=.
+  
+      # Retrieve number of records in database
+      database_details <- read_csv(
+        file = paste0(
+          'https://data.stackexchange.com/',
+          site_select,
+          '/csv/1180634?',
+          'Database=', database, '&',
+          'DateField=', datefield
+        ),
+        progress = FALSE,
+        col_types = cols() # Don't print column parse information
+      )
+
+      for (current_chunk in 0:(floor(database_details$REC_COUNT / 50000))) {
+
+        # Web:
+        # https://data.stackexchange.com/tex/query/951897/select-fixed-number-of-data-rows?Datefield=.&Database=.&From=.&To=.
+        # CSV:
+        # https://data.stackexchange.com/tex/csv/1180461?Datefield=.&Database=.&From=.&To=.
+  
+
+        # Retrieve all records in 50K chunks
+        temp_data <- read_csv(
+          file = paste0(
+            'https://data.stackexchange.com/',
+            site_select,
+            '/csv/1180461?',
+            'Database=', database, '&',
+            'Datefield=', datefield, '&',
+            'From=', as.integer((current_chunk * 50000) + 1), '&',
+            'To=', as.integer(
+              min(
+                (current_chunk + 1) * 50000, 
+                database_details$REC_COUNT
+              )
+            )
+          ),
+          progress = FALSE,
+          ...
+        )
+        
+        if (is.null(downloaded_data)) {
+          downloaded_data <- temp_data
+        } else {
+          downloaded_data <- downloaded_data %>% bind_rows(
+            temp_data
+          )
+        }
+      
+      }
+      
+      # Write user data to file, for off-line usage
+      downloaded_data %>% write_csv(
+        path = paste0(
+          base_folder,
+          '/Data/',
+          site_select,
+          '_', tolower(database), '.csv'
+        ),
+        na = ''
+      )
+
+      
+    } else { # !is.null(from) | !is.null(to)
+      # User specified a range
+      
+      downloaded_data <- read_csv(
+        file = paste0(
+          'https://data.stackexchange.com/',
+          site_select,
+          '/csv/1158806?',
+          'Database=', database, '&',
+          'Field=', datefield, '&',
+          'From=', from, '&',
+          'To=', to
+        ),
+        progress = FALSE,
+        col_types = cols() # Don't print column parse information
+      )
+      
+    }
+    
+  } else { # !download_data
+  
+    # Read data from file
+    downloaded_data <- read_csv(
+      file = paste0(
+        base_folder,
+        '/Data/',
+        site_select,
+        '_', tolower(database), '.csv'
+      ),
+      progress = FALSE,
+      col_types = cols() # Don't print column parse information
+    )
+    
+  }
+  
+  return (downloaded_data)
+  
+}
+
+```
+
+```{r Download data types, include = FALSE}
+
+# Query: Show all types
+# Description: Show post history types, post types and vote types.
+# URL: https://data.stackexchange.com/tex/query/774699/show-all-types
+# CSV: https://data.stackexchange.com/tex/csv/959010
+
+if (download_data) {
+
+  data_types <- read_csv(
+    file = paste0(
+      'https://data.stackexchange.com/',
+      site_select,
+      '/csv/959010'
+    ),
+    progress = FALSE
+  )
+  
+  data_types %>% write_csv(
+    path = paste0(
+      base_folder,
+      '/Data/data_types.csv'
+    ),
+    na = ''
+  )
+  
+} else {
+  
+  data_types <- read_csv(
+    file = paste0(
+      base_folder,
+      '/Data/data_types.csv'
+    ),
+    progress = FALSE
+  )
+  
+}
+
+
+```
+
+# Table of Contents
+
+- [Introduction](#introduction)
+
+- Statistics
+
+ - [Posts](#post-statistics)
+ 
+ - [Tags](#tag-statistics)
+
+ - [Users](#user-statistics)
+ 
+ - [Comments](#comment-statistics)
+ 
+ - [Badges](#badge-statistics)
+ 
+ - [Votes](#vote-statistics)
+ 
+ - [Reviews](#review-statistics)
+
+
+# Introduction
+
+This document contains statistics related to the community activities on [TeX - LaTeX Stack Exchange](//tex.stackexchange.com). Data is retrieved from [SEDE](https://data.stackexchange.com/) as well as being scraped from user profiles. The latter is used to establish a record of reputation by user over time.
+
+
+# Post statistics
+
+```{r Post data, include = FALSE, warning = FALSE, message = FALSE}
+
+post_data <- download_database(
+  database = 'Posts',
+  col_types = cols_only(
+    Id = col_integer(),
+    PostTypeId = col_integer(),
+    AcceptedAnswerId = col_integer(),
+    ParentId = col_integer(),
+    CreationDate = col_character(),
+    OwnerUserId = col_integer(),
+    Tags = col_character(),
+    ClosedDate = col_character(),
+    CommunityOwnedDate = col_character()
+  )
+) %>% mutate(
+  CreationDate = CreationDate %>% as_datetime(),
+  ClosedDate = ClosedDate %>% as_datetime(),
+  CommunityOwnedDate = CommunityOwnedDate %>% as_datetime()
+)
+
+# Create post data summary
+
+post_data_summary <- data.frame(
+  Date = as_date(
+    min(
+      as_date(post_data$CreationDate)
+    ):max(
+      as_date(post_data$CreationDate)
+    )
+  )
+) %>% left_join(
+  post_data %>% filter(
+    PostTypeId == 1 # Question
+  ) %>% mutate(
+    Date = CreationDate %>% as_date()
+  ) %>% count(
+    Date
+  ) %>% rename(
+    Question = n
+  ),
+  by = 'Date'
+) %>% left_join(
+  post_data %>% filter(
+    PostTypeId == 2 # Answer
+  ) %>% mutate(
+    Date = CreationDate %>% as_date()
+  ) %>% count(
+    Date
+  ) %>% rename(
+    Answer = n
+  ),
+  by = 'Date'
+) %>% mutate(
+  Question_smooth = rollapply(
+    data = Question %>% replace_na(0),
+    width = 7,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  ),
+  Answer_smooth = rollapply(
+    data = Answer %>% replace_na(0),
+    width = 7,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  )
+)
+
+# Create post data statistics
+
+# Question/Answer count by year
+post_data_statistics <- post_data_summary %>% mutate(
+  Date = Date %>% floor_date(
+    unit = 'year'
+  )
+) %>% group_by(
+  Date
+) %>% summarise(
+  Questions = Question %>% sum(na.rm = TRUE),
+  Answers = Answer %>% sum(na.rm = TRUE)
+) %>% ungroup() %>% mutate(
+  DateType = 'Year'
+) %>% gather(
+  key = 'Statistic',
+  value = 'Value',
+  Questions:Answers
+)
+
+# Question/Answer count by month
+post_data_statistics <- post_data_statistics %>% bind_rows(
+  post_data_summary %>% mutate(
+    Date = Date %>% floor_date(
+      unit = 'month'
+    )
+  ) %>% group_by(
+    Date
+  ) %>% summarise(
+    Questions = Question %>% sum(na.rm = TRUE),
+    Answers = Answer %>% sum(na.rm = TRUE)
+  ) %>% ungroup() %>% mutate(
+    DateType = 'Month'
+  ) %>% gather(
+    key = 'Statistic',
+    value = 'Value',
+    Questions:Answers
+  )
+)
+
+# Answers per Question by question year
+post_data_statistics <- post_data_statistics %>% bind_rows(
+  post_data %>% filter(
+    PostTypeId == 1 # Question
+  ) %>% select(
+    Id,
+    CreationDate
+  ) %>% left_join(
+    post_data %>% filter(
+      PostTypeId == 2 # Answer
+    ) %>% count(
+      ParentId
+    ) %>% rename(
+      Id = ParentId
+    ),
+    by = 'Id'
+  ) %>% mutate(
+    Date = CreationDate %>% as_date() %>% floor_date(
+      unit = 'year'
+    ),
+    n_with_NA = n,
+    n = n %>% replace_na(0),
+    Questions_with_Answers = if_else(
+      !is.na(n_with_NA),
+      1,
+      0
+    ),
+    Questions_without_Answers = (Questions_with_Answers + 1) %% 2
+  ) %>% group_by(
+    Date
+  ) %>% summarise(
+    Questions_with_Answers = Questions_with_Answers %>% sum(),
+    Questions_without_Answers = Questions_without_Answers %>% sum()
+  ) %>% ungroup() %>% mutate(
+    DateType = 'Year'
+  ) %>% gather(
+    key = 'Statistic',
+    value = 'Value',
+    Questions_with_Answers:Questions_without_Answers
+  )
+)
+
+# Answers per Question by Question month
+post_data_statistics <- post_data_statistics %>% bind_rows(
+  post_data %>% filter(
+    PostTypeId == 1 # Question
+  ) %>% select(
+    Id,
+    CreationDate
+  ) %>% left_join(
+    post_data %>% filter(
+      PostTypeId == 2 # Answer
+    ) %>% count(
+      ParentId
+    ) %>% rename(
+      Id = ParentId
+    ),
+    by = 'Id'
+  ) %>% mutate(
+    Date = CreationDate %>% as_date() %>% floor_date(
+      unit = 'month'
+    ),
+    n_with_NA = n,
+    n = n %>% replace_na(0),
+    Questions_with_Answers = if_else(
+      is.na(n_with_NA),
+      0,
+      1
+    ),
+    Questions_without_Answers = (Questions_with_Answers + 1) %% 2
+  ) %>% group_by(
+    Date
+  ) %>% summarise(
+    Answers_per_All_Questions = n %>% mean(),
+    Answers_per_Questions_with_Answers = n_with_NA %>% mean(
+      na.rm = TRUE
+    ),
+    Questions_with_Answers = Questions_with_Answers %>% sum(),
+    Questions_without_Answers = Questions_without_Answers %>% sum()
+  ) %>% ungroup() %>% mutate(
+    DateType = 'Month'
+  ) %>% gather(
+    key = 'Statistic',
+    value = 'Value',
+    Answers_per_All_Questions:Questions_without_Answers
+  )
+)
+
+# Accepted answers by year
+post_data_statistics <- post_data_statistics %>% bind_rows(
+  post_data %>% filter(
+    PostTypeId == 1 # Question
+  ) %>% mutate(
+    Date = CreationDate %>% as_date() %>% floor_date(
+      unit = 'year'
+    ),
+    HasAnswer = if_else(
+      is.na(AcceptedAnswerId),
+      0,
+      1
+    ),
+    NoAnswer = (HasAnswer + 1) %% 2
+  ) %>% group_by(
+    Date
+  ) %>% summarise(
+    Questions_with_Accepted_Answers = HasAnswer %>% sum(),
+    Questions_without_Accepted_Answers = NoAnswer %>% sum()
+  ) %>% ungroup() %>% mutate(
+    DateType = 'Year'
+  ) %>% gather(
+    key = 'Statistic',
+    value = 'Value',
+    Questions_with_Accepted_Answers:Questions_without_Accepted_Answers
+  )
+)
+
+# Accepted answers by month
+post_data_statistics <- post_data_statistics %>% bind_rows(
+  post_data %>% filter(
+    PostTypeId == 1 # Question
+  ) %>% mutate(
+    Date = CreationDate %>% as_date() %>% floor_date(
+      unit = 'month'
+    ),
+    HasAnswer = if_else(
+      is.na(AcceptedAnswerId),
+      0,
+      1
+    ),
+    NoAnswer = (HasAnswer + 1) %% 2
+  ) %>% group_by(
+    Date
+  ) %>% summarise(
+    Questions_with_Accepted_Answers = HasAnswer %>% sum(),
+    Questions_without_Accepted_Answers = NoAnswer %>% sum()
+  ) %>% ungroup() %>% mutate(
+    DateType = 'Month'
+  ) %>% gather(
+    key = 'Statistic',
+    value = 'Value',
+    Questions_with_Accepted_Answers:Questions_without_Accepted_Answers
+  )
+)
+
+# Average questions by day-of-week type (weekday/weekend)
+post_data_statistics <- post_data_statistics %>% bind_rows(
+  post_data %>% filter(
+    PostTypeId == 1 # Question
+  ) %>% mutate(
+    Date = CreationDate %>% as_date() %>% floor_date(
+      unit = 'year'
+    ),
+    Weekday = CreationDate %>% weekdays(),
+    n = 1
+  ) %>% left_join(
+    day_of_week %>% select(
+      Weekday,
+      WeekdayType
+    ),
+    by = 'Weekday'
+  ) %>% group_by(
+    Date,
+    WeekdayType
+  ) %>% summarise(
+    Value = n %>% sum()
+  ) %>% ungroup() %>% mutate(
+    DateType = 'Year',
+    WeekdayType = paste0(
+      'Questions_',
+      WeekdayType
+    )
+  ) %>% rename(
+    Statistic = WeekdayType
+  ) %>% spread(
+    Statistic,
+    Value
+  ) %>% left_join(
+    year_stats %>% select(
+      Date,
+      Weekdays,
+      Weekends
+    ),
+    by = 'Date'
+  ) %>% mutate(
+    Questions_Weekday = Questions_Weekday / Weekdays,
+    Questions_Weekend = Questions_Weekend / Weekends
+  ) %>% select(
+    -Weekdays,
+    -Weekends
+  ) %>% gather(
+    'Statistic',
+    'Value',
+    Questions_Weekday:Questions_Weekend
+  )
+)
+
+# Average answers by day-of-week type (weekday/weekend)
+post_data_statistics <- post_data_statistics %>% bind_rows(
+  post_data %>% filter(
+    PostTypeId == 2 # Answers
+  ) %>% mutate(
+    Date = CreationDate %>% as_date() %>% floor_date(
+      unit = 'year'
+    ),
+    Weekday = CreationDate %>% weekdays(),
+    n = 1
+  ) %>% left_join(
+    day_of_week %>% select(
+      Weekday,
+      WeekdayType
+    ),
+    by = 'Weekday'
+  ) %>% group_by(
+    Date,
+    WeekdayType
+  ) %>% summarise(
+    Value = n %>% sum()
+  ) %>% ungroup() %>% mutate(
+    DateType = 'Year',
+    WeekdayType = paste0(
+      'Answers_',
+      WeekdayType
+    )
+  ) %>% rename(
+    Statistic = WeekdayType
+  ) %>% spread(
+    Statistic,
+    Value
+  ) %>% left_join(
+    year_stats %>% select(
+      Date,
+      Weekdays,
+      Weekends
+    ),
+    by = 'Date'
+  ) %>% mutate(
+    Answers_Weekday = Answers_Weekday / Weekdays,
+    Answers_Weekend = Answers_Weekend / Weekends
+  ) %>% select(
+    -Weekdays,
+    -Weekends
+  ) %>% gather(
+    'Statistic',
+    'Value',
+    Answers_Weekday:Answers_Weekend
+  )
+)
+
+# Average posts by day-of-week type (weekday/weekend)
+post_data_statistics <- post_data_statistics %>% bind_rows(
+  post_data %>% mutate(
+    Date = CreationDate %>% as_date() %>% floor_date(
+      unit = 'year'
+    ),
+    Weekday = CreationDate %>% weekdays(),
+    n = 1
+  ) %>% left_join(
+    day_of_week %>% select(
+      Weekday,
+      WeekdayType
+    ),
+    by = 'Weekday'
+  ) %>% group_by(
+    Date,
+    WeekdayType
+  ) %>% summarise(
+    Value = n %>% sum()
+  ) %>% ungroup() %>% mutate(
+    DateType = 'Year',
+    WeekdayType = paste0(
+      'Posts_',
+      WeekdayType
+    )
+  ) %>% rename(
+    Statistic = WeekdayType
+  ) %>% spread(
+    Statistic,
+    Value
+  ) %>% left_join(
+    year_stats %>% select(
+      Date,
+      Weekdays,
+      Weekends
+    ),
+    by = 'Date'
+  ) %>% mutate(
+    Posts_Weekday = Posts_Weekday / Weekdays,
+    Posts_Weekend = Posts_Weekend / Weekends
+  ) %>% select(
+    -Weekdays,
+    -Weekends
+  ) %>% gather(
+    'Statistic',
+    'Value',
+    Posts_Weekday:Posts_Weekend
+  )
+)
+
+# Posts by time-of-day
+post_data_statistics <- post_data_statistics %>% bind_rows(
+  post_data %>% mutate(
+    Question = if_else(
+      PostTypeId == 1,
+      1,
+      0
+    ),
+    Answer = if_else(
+      PostTypeId == 2,
+      1,
+      0
+    ),
+    Date = CreationDate %>% as_date() %>% floor_date(
+      unit = 'year'
+    ),
+    YMDHMS = CreationDate %>% as_datetime() %>% floor_date(
+      unit = 'hour'
+    ) %>% as.character(),
+    Hour = YMDHMS %>% str_sub(
+      start = 12L, # YYYY-MM-DD HH:MM:SS
+      end = 13L
+    )
+  ) %>% group_by(
+    Date,
+    Hour
+  ) %>% summarise(
+    Questions = Question %>% sum(),
+    Answers = Answer %>% sum()
+  ) %>% ungroup() %>% mutate(
+    Posts = Questions + Answers
+  ) %>% gather(
+    key = 'Statistic',
+    value = 'Value',
+    Questions:Posts
+  ) %>% mutate(
+    DateType = paste0(
+      'Hour_',
+      Hour
+    )
+  ) %>% left_join(
+    year_stats %>% select(
+      Date,
+      Days
+    ),
+    by = 'Date'
+  ) %>% mutate(
+    Value = Value / Days
+  ) %>% select(
+    -Hour,
+    -Days
+  )
+)
+
+```
+
+`r current_year` saw a total of `r post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Questions') %>% select(Value) %>% pull() %>% comma(digits = 0L)` questions (from `r post_data %>% filter(PostTypeId == 1, year(CreationDate) == current_year) %>% select(OwnerUserId) %>% unique() %>% nrow() %>% comma(digits = 0L)` users) and `r post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Answers') %>% pull(Value) %>% comma(digits = 0L)` answers (from `r post_data %>% filter(PostTypeId == 2, year(CreationDate) == current_year) %>% select(OwnerUserId) %>% unique() %>% nrow() %>% comma(digits = 0L)` users). Of the total questions, `r post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Questions_with_Answers') %>% pull(Value) %>% comma(digits = 0L)` have answers, while the remainder (`r post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Questions_without_Answers') %>% pull(Value) %>% comma(digits = 0L)`) are without. This yields a ratio of `r ((post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Answers') %>% pull(Value)) / (post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Questions') %>% pull(Value))) %>% comma(digits = 1L)` answers per question (`r ((post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Questions_with_Answers') %>% pull(Value)) / (post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Questions') %>% pull(Value))) %>% comma(digits = 1L)` if one considers questions *with* answers only). An average of `r ((post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Questions') %>% pull(Value)) / (year_stats %>% filter(year(Date) == current_year) %>% pull(Days))) %>% comma(digits = 1L)` questions per day matched `r ((post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Answers') %>% pull(Value)) / (year_stats %>% filter(year(Date) == current_year) %>% pull(Days))) %>% comma(digits = 1L)` answers per day during `r current_year`.
+
+
+```{r Post data chart, echo = FALSE, message = FALSE, warning = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines',
+  data = post_data_summary
+) %>% add_lines(
+  x = ~Date,
+  y = ~Question,
+  name = 'Questions',
+  showlegend = FALSE,
+  line = list(
+    color = colour$question %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Answer,
+  name = 'Answers',
+  showlegend = FALSE,
+  line = list(
+    color = colour$answer %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Question_smooth,
+  name = 'Questions (7-day avg)',
+  line = list(
+    color = colour$question,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Answer_smooth,
+  name = 'Answers (7-day avg)',
+  line = list(
+    color = colour$answer,
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    if (meta_site) 'TeX.Meta.SE' else 'TeX.SE',
+    ' posts by day (', current_year, ')'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1)  # x-max
+    )
+  ),
+  yaxis = list(
+    title = '#',
+    rangemode = 'tozero',
+    range = c(
+      0, # y-min
+      post_data_summary %>% filter(
+        year(Date) >= current_year - 1
+      ) %>% select(
+        Answer_smooth
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1 # y-max
+    )
+  ),
+  shapes = list(
+    list( # Start of year
+      type = 'line',
+      line = list(
+        color = 'black',
+        width = 2.5
+      ),
+      opacity = 0.2,
+      layer = 'below',
+      x0 = paste0(
+        current_year, '0101'
+      ) %>% ymd(),
+      y0 = 0,
+      x1 = paste0(
+        current_year, '0101'
+      ) %>% ymd(),
+      y1 = post_data_summary %>% filter(
+        year(Date) >= current_year - 1
+      ) %>% select(
+        Answer_smooth
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1
+    ),
+    list( # End of year
+      type = 'line',
+      line = list(
+        color = 'black',
+        width = 2.5
+      ),
+      opacity = 0.2,
+      layer = 'below',
+      x0 = paste0(
+        current_year, '1231'
+      ) %>% ymd(),
+      y0 = 0,
+      x1 = paste0(
+        current_year, '1231'
+      ) %>% ymd(),
+      y1 = post_data_summary %>% filter(
+        year(Date) >= current_year - 1
+      ) %>% select(
+        Answer_smooth
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+Weekends tend to be slower in terms of post activity by about `r (100 - 100 * (post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Posts_Weekend') %>% pull(Value)) / (post_data_statistics %>% filter(DateType == 'Year', year(Date) == current_year, Statistic == 'Posts_Weekday') %>% pull(Value))) %>% comma(digits = 1L)`%.
+
+```{r Post weekday/weekend statistics, echo = FALSE, message = FALSE, warning = FALSE}
+
+plot_ly(
+  type = 'bar',
+  data = post_data_statistics %>% filter(
+    Statistic %in% c(
+      'Questions_Weekday',
+      'Questions_Weekend',
+      'Answers_Weekday',
+      'Answers_Weekend',
+      'Posts_Weekday',
+      'Posts_Weekend'
+    ),
+    DateType == 'Year',
+    year(Date) == current_year
+  ) %>% transmute(
+    Statistic = Statistic,
+    Value = Value %>% round(1)
+  ) %>% separate(
+    Statistic,
+    c('PostType', 'WeekdayType')
+  ) %>% spread(
+    WeekdayType,
+    Value
+  ) %>% slice(
+    c(
+      3, # Questions
+      1, # Answers
+      2  # Total posts
+    )
+  )
+) %>% add_trace(
+  x = ~PostType,
+  y = ~Weekday,
+  name = 'Weekday',
+  text = ~Weekday %>% comma(digits = 1L),
+  textposition = 'outside',
+  marker = list(
+    color = colour$weekday
+  )
+) %>% add_trace(
+  x = ~PostType,
+  y = ~Weekend,
+  name = 'Weekend',
+  text = ~Weekend %>% comma(digits = 1L),
+  textposition = 'outside',
+  marker = list(
+    color = colour$weekend
+  )
+) %>% layout(
+  title = paste0(
+    if (meta_site) 'TeX.Meta.SE' else 'TeX.SE',
+    ' average posts by day-of-week (', 
+    current_year, 
+    ')'
+  ),
+  xaxis = list(
+    title = ''
+  ),
+  yaxis = list(
+    title = '#'
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+Here is a view on historical post statistics by year:
+
+```{r Post history table, echo = FALSE}
+
+post_data_statistics %>% filter(
+  DateType == 'Year',
+  year(Date) > 2010
+) %>% mutate(
+  Year = year(Date)
+) %>% select(
+  -Date,
+  -DateType
+) %>% spread(
+  key = Statistic,
+  value = Value
+) %>% left_join(
+  year_stats %>% transmute(
+    Year = year(Date),
+    Days = Days
+  ),
+  by = 'Year'
+) %>% transmute(
+  Year = Year,
+  Questions = Questions %>% comma(digits = 0L),
+  Answers = Answers %>% comma(digits = 0L),
+  Posts = (Questions + Answers) %>% comma(digits = 0L),
+  `Q:A ratio` = cell_spec(paste0(
+    '1:',
+    (Answers / Questions) %>% comma(digits = 1L)
+  ), align = 'center'),
+  Questions_Weekday = Questions_Weekday %>% comma(digits = 1L),
+  Questions_Weekend = Questions_Weekend %>% comma(digits = 1L),
+  Questions_Day = (Questions / Days) %>% comma(digits = 1L),
+  Answers_Weekday = Answers_Weekday %>% comma(digits = 1L),
+  Answers_Weekend = Answers_Weekend %>% comma(digits = 1L),
+  Answers_Day = (Answers / Days) %>% comma(digits = 1L),
+  Posts_Weekday = Posts_Weekday %>% comma(digits = 1L),
+  Posts_Weekend = Posts_Weekend %>% comma(digits = 1L),
+  Posts_Day = (Posts / Days) %>% comma(digits = 1L)
+) %>% arrange(
+  desc(Year)
+) %>% rename(
+  Weekday = Questions_Weekday,
+  Weekend = Questions_Weekend,
+  Day = Questions_Day,
+  Weekday = Answers_Weekday,
+  Weekend = Answers_Weekend,
+  Day = Answers_Day,
+  Weekday = Posts_Weekday,
+  Weekend = Posts_Weekend,
+  Day = Posts_Day
+) %>% kable(
+  # https://haozhu233.github.io/kableExtra/awesome_table_in_html.html#celltext_specification
+  format = 'html',
+  escape = FALSE
+) %>% kable_styling(
+  bootstrap_options = c(
+    'striped', 
+    'hover',
+    'responsive'
+  ),
+  full_width = FALSE
+) %>% add_header_above(
+  c(
+    ' ' = 5, # Year, Questions, Answers, Posts, Q:A ratio
+    'Questions per' = 3,
+    'Answers per' = 3,
+    'Posts per' = 3
+  )
+)
+
+```
+
+
+Activity on Stack Exchange is time-stamped using UTC. Most activity in `r current_year` occurs in the afternoon, while things slow down around midnight.
+
+```{r Posts by hour, echo = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'line',
+  data = post_data_statistics %>% filter(
+    DateType %>% str_sub(
+      start = 1L,
+      end = 4L
+    ) == 'Hour',
+    Statistic != 'Posts'
+  ) %>% mutate(
+    Hour = paste0(
+      DateType %>% str_sub(
+        start = 6L,
+        end = 7L
+      ),
+      if_else(
+        DateType %in% c(
+          'Hour_00', 'Hour_23'
+        ),
+        paste0(
+          '\n\'',
+          year(Date) %>% str_sub(
+            start = 3L,
+            end = 4L
+          )
+        ),
+        ''
+      )
+    )
+  ) %>% spread(
+    key = 'Statistic',
+    value = 'Value'
+  ) %>% mutate(
+    num = row_number()
+  )
+) %>% add_lines(
+  x = ~num,
+  y = ~Questions,
+  name = 'Questions',
+  line = list(
+    color = colour$question
+  )
+) %>% add_lines(
+  x = ~num,
+  y = ~Answers,
+  name = 'Answers',
+  line = list(
+    color = colour$answer
+  )
+) %>% layout(
+  title = paste0(
+    if (meta_site) 'TeX.Meta.SE' else 'TeX.SE',
+    ' posts per hour by time of day (',
+    current_year,
+    ') [Hour (UTC)]'
+  ),
+  xaxis = list(
+    title = '',
+    type = 'category',
+    tickmode = 'array',
+    tickvals = ~num,
+    ticktext = ~Hour,
+    tickangle = 0,
+    range = c(
+      (post_data_statistics %>% filter(
+        DateType %>% str_sub(
+          start = 1L,
+          end = 4L
+        ) == 'Hour',
+        Statistic != 'Posts'
+      ) %>% spread(
+        key = 'Statistic',
+        value = 'Value'
+      ) %>% mutate(
+        num = row_number()
+      ) %>% slice(
+        (n() - 24):n()
+      ) %>% select(
+        num
+      ) %>% pull())[c(1, 24)] + 1
+    )
+  ),
+  yaxis = list(
+    title = '#',
+    range = c(
+      0, # y-min,
+      post_data_statistics %>% filter(
+        DateType %>% str_sub(
+          start = 1L,
+          end = 4L
+        ) == 'Hour',
+        Statistic == 'Answers',
+        year(Date) >= (current_year - 1) # Use at most 2 year's data
+      ) %>% select(
+        Value
+      ) %>% max() * 1.1 # y-max
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+```{r Estimated time to answer, echo = FALSE}
+
+answer_time <- post_data %>% filter(
+  PostTypeId == 1 # Question
+) %>% transmute(
+  QuestionId = Id,
+  QuestionDate = CreationDate %>% as_datetime()
+) %>% inner_join(
+  post_data %>% filter(
+    PostTypeId == 2 # Answer
+  ) %>% transmute(
+    AnswerId = Id,
+    QuestionId = ParentId,
+    AnswerDate = CreationDate %>% as_datetime()
+  ),
+  by = 'QuestionId'
+) %>% transmute(
+  Date = QuestionDate %>% as_date() %>% floor_date(
+    unit = 'year'
+  ),
+  QuestionDate = QuestionDate,
+  AnswerTime = time_length(
+    AnswerDate - QuestionDate,
+    unit = 'minutes'
+  ) %>% round(0)
+) %>% filter(
+  AnswerTime >= 0
+) %>% group_by(
+  Date
+) %>% count(
+  AnswerTime
+) %>% mutate(
+  AnswerTimeAvg = rollapply(
+    data = n,
+    width = 5,
+    fill = NA,
+    FUN = mean,
+    align = 'center'
+  )
+)
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines+markers',
+  data = answer_time %>% filter(
+    year(Date) == current_year
+  )
+) %>% add_lines(
+  x = ~AnswerTime,
+  y = ~AnswerTimeAvg,
+  name = '5-minute range average',
+  line = list(
+    color = colour$question %>% alpha(0.2),
+    width = 5
+  )
+) %>% add_markers(
+  x = ~AnswerTime,
+  y = ~n,
+  name = 'Questions',
+  marker = list(
+    color = colour$question,
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    if (meta_site) 'TeX.Meta.SE' else 'TeX.SE',
+    ' time to answer (',
+    current_year,
+    ') [minutes]'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      0, # minutes
+      240 # minutes = 4 hours
+    )
+  ),
+  yaxis = list(
+    title = '# of questions'
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+```{r Answer time histogram, include = FALSE}
+
+answer_time_histogram <- post_data %>% filter(
+  PostTypeId == 1 # Question
+) %>% transmute(
+  QuestionId = Id,
+  QuestionDate = CreationDate %>% as_datetime()
+) %>% inner_join(
+  post_data %>% filter(
+    PostTypeId == 2 # Answer
+  ) %>% transmute(
+    AnswerId = Id,
+    QuestionId = ParentId,
+    AnswerDate = CreationDate %>% as_datetime()
+  ),
+  by = 'QuestionId'
+) %>% transmute(
+  Date = QuestionDate %>% as_date() %>% floor_date(
+    unit = 'year'
+  ),
+  QuestionDate = QuestionDate,
+  AnswerTime = time_length(
+    AnswerDate - QuestionDate,
+    unit = 'minutes'
+  ) %>% round(0)
+) %>% filter(
+  AnswerTime >= 0
+#  AnswerTime <= (
+#    7 * 24 * 60
+#  )
+) %>% arrange(
+  Date,
+  AnswerTime
+)
+
+
+plot_ly(
+  type = 'histogram',
+  histnorm = 'probability',
+  cumulative = list(
+    enabled = TRUE
+  ),
+  #nbinsx = answer_time_histogram$AnswerTime %>% max(),
+  #xbins = list(
+  #  start = 0,
+  #  end = answer_time_histogram$AnswerTime %>% max(),
+  #  size = 1
+  #),
+  data = answer_time_histogram,
+  x = ~AnswerTime,
+  showlegend = FALSE
+) %>% layout(
+  title = paste0(
+    if (meta_site) 'TeX.Meta.SE' else 'TeX.SE',
+    ' time to answer histogram (',
+    current_year,
+    ') [minutes]'
+  ),
+  xaxis = list(
+    title = 'Minutes',
+    range = c(
+      0, # x-min
+      2 * 60 # x-max
+    )
+  ),
+  yaxis = list(
+    title = 'Probability',
+    range = c(
+      0, # y-min
+      1  # y-max
+    ),
+    nticks = 11
+  )
+)
+
+```
+
+On average, questions receive answers very quickly; the median answer time in `r current_year` was `r answer_time_histogram %>% filter(year(Date) == current_year) %>% select(AnswerTime) %>% pull() %>% median()` minutes. Since questions can receive answers well after they've been posted, the maximum answer time will tend to grow for older questions (1&nbsp;year ~ `r (1 * 365 * 24 * 60) %>% comma(digits = 0L)` minutes).
+
+
+```{r Median/maximum answer time, echo = FALSE}
+
+answer_time_histogram %>% filter(
+  year(Date) > 2010
+) %>% group_by(
+  Date
+) %>% summarise(
+  AnswerTime_median = median(AnswerTime),
+  AnswerTime_max = max(AnswerTime)
+) %>% ungroup() %>% transmute(
+  Year = year(Date),
+  Median = AnswerTime_median %>% comma(digits = 1L),
+  Max = AnswerTime_max %>% comma(digits = 0L)
+) %>% arrange(
+  desc(Year)
+) %>% kable()%>% kable_styling(
+  bootstrap_options = c(
+    'striped', 
+    'hover',
+    'responsive'
+  ),
+  full_width = FALSE
+) %>% add_header_above(
+  c(
+    ' ' = 1, # Year
+    'Time to answer [minutes]' = 2
+  )
+)
+
+```
+
+Values prior to 2011 may be distorted as they stem from migrated questions and/or merged answered that occurred prior to the [site graduation](https://tex.meta.stackexchange.com/q/3175/5764); the site was proposed and graduated in the latter part of 2010, so we're only considering content stemming from a full year of activity.
+
+
+# Tag statistics
+
+```{r Tag statistics, echo = FALSE, messages = FALSE, warnings = FALSE}
+
+tag_data <- post_data %>% select(
+  CreationDate,
+  Tags
+) %>% filter(
+  !is.na(Tags)
+) %>% mutate(
+  Tags = Tags %>% str_replace_all(
+    '><', ','
+  ) %>% str_replace_all(
+    '<', ''
+  ) %>% str_replace_all(
+    '>', ''
+  )%>% str_c(
+    str_dup(',', times = 4 - str_count(Tags, '><'))
+  )
+) %>% separate(
+  Tags,
+  c(paste0('Tag', 1:5)),
+  sep = ','
+) %>% gather(
+  'TagNum', 'Tag',
+  starts_with('Tag')
+) %>% select(
+  -TagNum
+) %>% filter(
+  Tag != ''
+)
+
+tag_top_5 <- tag_data %>% filter(
+  year(CreationDate) == current_year
+) %>% count(
+  Tag
+) %>% arrange(
+  desc(n)
+) %>% head(
+  5
+)
+
+tag_summary <- tag_data %>% semi_join(
+  tag_top_5,
+  by = 'Tag'
+) %>% transmute(
+  Date = CreationDate %>% as_date(),
+  Tag = Tag
+) %>% group_by(
+  Date
+) %>% count(
+  Tag
+) %>% ungroup() %>% bind_rows(
+  data.frame(
+    Date = seq(
+      from = tag_data$CreationDate %>% min() %>% as_date(),
+      to = tag_data$CreationDate %>% max() %>% as_date(),
+      by = 'day'
+    ),
+    Tag1 = 0,
+    Tag2 = 0,
+    Tag3 = 0,
+    Tag4 = 0,
+    Tag5 = 0
+  ) %>% gather(
+    key = 'Tag',
+    value = 'n',
+    starts_with('Tag')
+  )
+) %>% mutate(
+  Tag = case_when(
+    Tag == 'Tag1' ~ tag_top_5$Tag[1],
+    Tag == 'Tag2' ~ tag_top_5$Tag[2],
+    Tag == 'Tag3' ~ tag_top_5$Tag[3],
+    Tag == 'Tag4' ~ tag_top_5$Tag[4],
+    Tag == 'Tag5' ~ tag_top_5$Tag[5],
+    TRUE ~ Tag
+  )
+) %>% group_by(
+  Date,
+  Tag
+) %>% summarise(
+  n = sum(n)
+) %>% ungroup() %>% group_by(
+  Tag
+) %>% mutate(
+  n_smooth = rollapply(
+    data = n,
+    width = 30,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  )
+) %>% ungroup()
+
+```
+
+The top tag used in `r current_year` was {`r tag_top_5 %>% slice(1) %>% pull(Tag)`} with a total of `r tag_top_5 %>% slice(1) %>% pull(n) %>% comma(digits = 0L)` questions being tagged with it. Other tags were also used frequently. Here are the top&nbsp;5 tags used during `r current_year` compared to the previous two years:
+
+```{r Top 5 tags for last 3 years, echo = FALSE, messages = FALSE, warning = FALSE}
+
+tag_top_5_years <- tag_data %>% mutate(
+  CreationDate = CreationDate %>% as_date() %>% floor_date(
+    unit = 'year'
+  )
+) %>% group_by(
+  CreationDate
+) %>% count(
+  Tag
+) %>% arrange(
+  desc(CreationDate),
+  desc(n)
+) %>% mutate(
+  Rank = row_number()
+) %>% ungroup() %>% filter(
+  Rank < 6
+) %>% select(
+  -Rank
+)
+
+# https://stackoverflow.com/q/45206908/914686
+grouped_columns = c(
+  1, 
+  2, 
+  2, 
+  2
+)
+names(grouped_columns) = c(
+  ' ', 
+  current_year, 
+  current_year - 1, 
+  current_year - 2
+)
+
+data.frame(
+  Rank = 1:5
+) %>% bind_cols(
+  tag_top_5_years %>% filter(
+    CreationDate == paste0(
+      current_year, '0101'
+    ) %>% ymd()
+  ) %>% transmute(
+    Tag1 = Tag,
+    Questions1 = n %>% comma(digits = 0L)
+  ),
+  tag_top_5_years %>% filter(
+    CreationDate == paste0(
+      current_year - 1, '0101'
+    ) %>% ymd()
+  ) %>% transmute(
+    Tag2 = Tag,
+    Questions2 = n %>% comma(digits = 0L)
+  ),
+  tag_top_5_years %>% filter(
+    CreationDate == paste0(
+      current_year - 2, '0101'
+    ) %>% ymd()
+  ) %>% transmute(
+    Tag3 = Tag,
+    Questions3 = n %>% comma(digits = 0L)
+  )
+) %>% rename(
+  Tag = Tag1,
+  Questions = Questions1,
+  Tag = Tag2,
+  Questions = Questions2,
+  Tag = Tag3,
+  Questions = Questions3
+) %>% kable(
+  format = 'html',
+  escape = FALSE
+) %>% kable_styling(
+  bootstrap_options = c(
+    'striped', 
+    'hover',
+    'responsive'
+  ),
+  full_width = FALSE
+) %>% add_header_above(
+  grouped_columns
+)
+
+remove(
+  grouped_columns
+)
+
+```
+
+
+```{r Tag statistics chart, echo = FALSE, messages = FALSE, warning = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines'
+) %>% add_lines(
+  data = tag_summary %>% filter(
+    Tag == tag_top_5$Tag[1]
+  ),
+  x = ~Date,
+  y = ~n,
+  name = tag_top_5$Tag[1],
+  showlegend = FALSE,
+  hovertext = '',
+  line = list(
+    color = colour$top_5_1 %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  data = tag_summary %>% filter(
+    Tag == tag_top_5$Tag[2]
+  ),
+  x = ~Date,
+  y = ~n,
+  name = tag_top_5$Tag[2],
+  showlegend = FALSE,
+  hovertext = '',
+  line = list(
+    color = colour$top_5_2 %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  data = tag_summary %>% filter(
+    Tag == tag_top_5$Tag[3]
+  ),
+  x = ~Date,
+  y = ~n,
+  name = tag_top_5$Tag[3],
+  showlegend = FALSE,
+  hovertext = '',
+  line = list(
+    color = colour$top_5_3 %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  data = tag_summary %>% filter(
+    Tag == tag_top_5$Tag[1]
+  ),
+  x = ~Date,
+  y = ~n_smooth,
+  name = tag_top_5$Tag[1],
+  line = list(
+    color = colour$top_5_1,
+    width = 2
+  )
+) %>% add_lines(
+  data = tag_summary %>% filter(
+    Tag == tag_top_5$Tag[2]
+  ),
+  x = ~Date,
+  y = ~n_smooth,
+  name = tag_top_5$Tag[2],
+  line = list(
+    color = colour$top_5_2,
+    width = 2
+  )
+) %>% add_lines(
+  data = tag_summary %>% filter(
+    Tag == tag_top_5$Tag[3]
+  ),
+  x = ~Date,
+  y = ~n_smooth,
+  name = tag_top_5$Tag[3],
+  line = list(
+    color = colour$top_5_3,
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    'TeX.SE top 3 tags (',
+    current_year,
+    ') (30-day avg)'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1)  # x-max
+    )
+  ),
+  yaxis = list(
+    title = 'Questions',
+    range = c(
+      0, # y-min
+      tag_summary %>% filter(
+        Tag == tag_top_5$Tag[1],
+        year(Date) == current_year
+      ) %>% select(
+        n_smooth
+      ) %>% pull() %>% max() * 1.1
+    ) # y-max
+  ),
+  shapes = list(
+    list( # Start of year
+      type = 'line',
+      line = list(
+        color = 'black',
+        width = 2.5
+      ),
+      opacity = 0.2,
+      layer = 'below',
+      x0 = paste0(
+        current_year, '0101'
+      ) %>% ymd(),
+      y0 = 0,
+      x1 = paste0(
+        current_year, '0101'
+      ) %>% ymd(),
+      y1 = tag_summary %>% filter(
+        Tag == tag_top_5$Tag[1],
+        year(Date) == current_year
+      ) %>% select(
+        n_smooth
+      ) %>% pull() %>% max() * 1.1
+    ),
+    list( # End of year
+      type = 'line',
+      line = list(
+        color = 'black',
+        width = 2.5
+      ),
+      opacity = 0.2,
+      layer = 'below',
+      x0 = paste0(
+        current_year, '1231'
+      ) %>% ymd(),
+      y0 = 0,
+      x1 = paste0(
+        current_year, '1231'
+      ) %>% ymd(),
+      y1 = tag_summary %>% filter(
+        Tag == tag_top_5$Tag[1],
+        year(Date) == current_year
+      ) %>% select(
+        n_smooth
+      ) %>% pull() %>% max() * 1.1
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.1,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+# User statistics
+
+```{r User data, include = FALSE}
+
+user_data <- download_database(
+  database = 'Users',
+  col_types = cols_only(
+    Id = col_integer(),
+    Reputation = col_integer(),
+    CreationDate = col_character(),
+    AccountId = col_integer()
+  )
+) %>% mutate(
+  CreationDate = CreationDate %>% as_date()
+)
+
+
+# Create user data summary
+
+user_data_summary <- data.frame(
+  Date = as_date(
+    min(
+      user_data$CreationDate
+    ):max(
+      user_data$CreationDate
+    )
+  )
+) %>% left_join(
+  user_data %>% count(
+    CreationDate
+  ) %>% rename(
+    Date = CreationDate
+  ),
+  by = 'Date'
+) %>% mutate(
+  n_smooth = rollapply(
+    data = n %>% replace_na(0),
+    width = 30,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  )
+)
+
+one_post_users <- post_data %>% count(
+  OwnerUserId
+) %>% filter(
+  !is.na(OwnerUserId),
+  n == 1
+) %>% left_join(
+  user_data %>% transmute(
+    OwnerUserId = Id,
+    Date = CreationDate %>% as_date()
+  ),
+  by = 'OwnerUserId'
+) %>% count(
+  Date
+)
+# Add any days unaccounted for and create moving average
+one_post_users <- one_post_users %>% full_join(
+  data.frame(
+    Date = seq(
+      from = one_post_users$Date %>% min(
+        na.rm = TRUE
+      ),
+      to = one_post_users$Date %>% max(
+        na.rm = TRUE
+      ),
+      by = 'day'
+    )
+  ),
+  by = 'Date'
+) %>% mutate(
+  nn_30avg = rollapply(
+    data = nn %>% replace_na(0),
+    width = 30,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  )
+)
+
+```
+
+To date, there are `r user_data %>% filter(year(CreationDate) <= current_year) %>% nrow() %>% comma(digits = 0L)` users subscribed to TeX.SE. A total of `r user_data %>% filter(year(CreationDate) == current_year) %>% nrow() %>% comma(digits = 0L)` users joined in `r current_year` alone. On average, `r (100 * (one_post_users %>% filter(year(Date) == current_year) %>% pull(nn) %>% sum()) / (user_data_summary %>% filter(year(Date) == current_year) %>% pull(n) %>% sum())) %>% comma(digits = 1)`% of the users were one-post users. That is, they only made one post. Of course, this includes users who joined the site close to the end of `r current_year` and may not have enough time to make multiple posts.
+
+```{r User data chart, echo = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines',
+  data = user_data_summary
+) %>% add_lines(
+  x = ~Date,
+  y = ~n,
+  name = 'Users',
+  showlegend = FALSE,
+  line = list(
+    color = colour$user %>% alpha(0.1)
+  )
+) %>% add_lines(
+  data = user_data_summary,
+  x = ~Date,
+  y = ~n_smooth,
+  name = 'Users (30-day moving average)',
+  line = list(
+    color = colour$user,
+    width = 2
+  )
+) %>% add_lines(
+  data = one_post_users,
+  x = ~Date,
+  y = ~nn,
+  name = 'One-post users',
+  showlegend = FALSE,
+  line = list(
+    color = colour$orange %>% alpha(0.1)
+  )
+) %>% add_lines(
+  data = one_post_users,
+  x = ~Date,
+  y = ~nn_30avg,
+  name = 'One-post users (30-day moving average)',
+  line = list(
+    color = colour$orange,
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    'New users to ',
+    if (meta_site) 'TeX.Meta.SE' else 'TeX.SE',
+    ' (',
+    current_year,
+    ') [per day]'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1) # x-max
+    )
+  ),
+  yaxis = list(
+    title = '#',
+    range = c(
+      0, # y-min
+      user_data_summary %>% filter(
+        year(Date) >= current_year - 1 # At least 2 years of data
+      ) %>% select(
+        n
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1 # y-max
+    )
+  ),
+  shapes = list(
+    list( # Start of year
+      type = 'line',
+      line = list(
+        color = 'black',
+        width = 2.5
+      ),
+      opacity = 0.2,
+      layer = 'below',
+      x0 = paste0(
+        current_year, '0101'
+      ) %>% ymd(),
+      y0 = 0,
+      x1 = paste0(
+        current_year, '0101'
+      ) %>% ymd(),
+      y1 = user_data_summary %>% filter(
+        year(Date) >= current_year - 1 # At least 2 years of data
+      ) %>% select(
+        n
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1
+    ),
+    list( # End of year
+      type = 'line',
+      line = list(
+        color = 'black',
+        width = 2.5
+      ),
+      opacity = 0.2,
+      layer = 'below',
+      x0 = paste0(
+        current_year, '1231'
+      ) %>% ymd(),
+      y0 = 0,
+      x1 = paste0(
+        current_year, '1231'
+      ) %>% ymd(),
+      y1 = user_data_summary %>% filter(
+        year(Date) >= current_year - 1 # At least 2 years of data
+      ) %>% select(
+        n
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+```{r user reputation, include = FALSE, warning = FALSE, message = FALSE}
+
+user_rep_history <- read_csv(
+  file = paste0(
+    base_folder,
+    '/Data/tex_reputation_history.csv'
+  )
+)
+
+user_rep_summary <- user_rep_history %>% filter(
+  DATE <= paste0(
+    current_year, '1231'
+  ) %>% ymd()
+) %>% group_by(
+  USERID
+) %>% summarise(
+  REP = sum(REP)
+) %>% left_join(
+  post_data %>% filter(
+    !is.na(OwnerUserId),
+    PostTypeId %in% c(
+      1, # Question
+      2  # Answer
+    )
+  ) %>% count(
+    OwnerUserId
+  ) %>% rename(
+    USERID = OwnerUserId
+  ),
+  by = 'USERID'
+) %>% filter(
+  !is.na(n)
+) %>% mutate(
+  REP_per_post = REP / n
+)
+
+
+plot_ly(
+  type = 'scatter',
+  mode = 'markers',
+  data = user_rep_summary
+) %>% add_markers(
+  x = ~REP,
+  y = ~REP_per_post,
+  showlegend = FALSE,
+  name = 'Reputation per post'
+) %>% layout(
+  title = paste0(
+    'TeX.SE reputation by post (',
+    current_year,
+    ')'
+  ),
+  xaxis = list(
+    title = 'Reputation'
+  ),
+  yaxis = list(
+    title = 'Reputation per post',
+    type = 'log'
+  )
+)
+
+```
+
+
+```{r Site reputation over time, include = FALSE, warning = FALSE, message = FALSE}
+
+user_rep_history_top10 <- user_rep_history %>% semi_join(
+  user_rep_history %>% filter(
+    year(DATE) == current_year
+  ) %>% group_by(
+    USERID
+  ) %>% summarise(
+    REP = sum(REP)
+  ) %>% ungroup() %>% arrange(
+    desc(REP)
+  ) %>% head(
+    10
+  ),
+  by = 'USERID'
+)
+
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines',
+  data = user_rep_history %>% group_by(
+    DATE
+  ) %>% summarise(
+    REP = sum(REP)
+  ) %>% ungroup() %>% mutate(
+    REP_smooth = rollapply(
+      data = REP,
+      width = 7,
+      FUN = mean,
+      fill = NA,
+      align = 'right'
+    )
+  )
+) %>% add_lines(
+  x = ~DATE,
+  y = ~REP,
+  name = 'Site reputation',
+  showlegend = FALSE,
+  line = list(
+    color = colour$orange %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~DATE,
+  y = ~REP_smooth,
+  name = 'Site reputation (7-day avg)',
+  hovertext = 'Site',
+  line = list(
+    color = colour$orange,
+    width = 2
+  )
+) %>% add_lines(
+  data = user_rep_history_top10 %>% group_by(
+    DATE
+  ) %>% summarise(
+    REP = sum(REP)
+  ) %>% ungroup(),
+  x = ~DATE,
+  y = ~REP,
+  name = paste0(
+    'Top 10 users (', 
+    current_year, 
+    ') reputation'
+  ),
+  hovertext = 'Top 10',
+  showlegend = FALSE,
+  line = list(
+    color = colour$red %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  data = user_rep_history_top10 %>% group_by(
+    DATE
+  ) %>% summarise(
+    REP = sum(REP)
+  ) %>% ungroup() %>% mutate(
+    REP_smooth = rollapply(
+      data = REP,
+      width = 7,
+      FUN = mean,
+      fill = NA,
+      align = 'right'
+    )
+  ),
+  x = ~DATE,
+  y = ~REP_smooth,
+  name = paste0(
+    'Top 10 users (',
+    current_year,
+    ') reputation (7-day avg)'
+  ),
+  hovertext = 'Top 10',
+  line = list(
+    color = colour$red,
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    'TeX.SE site reputation (',
+    current_year,
+    ')'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1)  # x-max
+    )
+  ),
+  yaxis = list(
+    title = 'Total reputation',
+    range = c(
+      0, # y-min
+      user_rep_history %>% group_by(
+        DATE
+      ) %>% summarise(
+        REP = sum(REP)
+      ) %>% filter(
+        year(DATE) >= current_year - 1
+      ) %>% select(
+        REP
+      ) %>% pull() %>% max() * 1.1 # y-max
+    )
+  ),
+  shapes = list(
+    list( # Start of year
+      type = 'line',
+      line = list(
+        color = 'black',
+        width = 2.5
+      ),
+      opacity = 0.2,
+      layer = 'below',
+      x0 = paste0(
+        current_year, '0101'
+      ) %>% ymd(),
+      y0 = 0,
+      x1 = paste0(
+        current_year, '0101'
+      ) %>% ymd(),
+      y1 = user_rep_history %>% group_by(
+        DATE
+      ) %>% summarise(
+        REP = sum(REP)
+      ) %>% ungroup() %>% filter(
+        year(DATE) >= current_year - 1
+      ) %>% select(
+        REP
+      ) %>% pull() %>% max() * 1.1
+    ),
+    list( # End of year
+      type = 'line',
+      line = list(
+        color = 'black',
+        width = 2.5
+      ),
+      opacity = 0.2,
+      layer = 'below',
+      x0 = paste0(
+        current_year, '1231'
+      ) %>% ymd(),
+      y0 = 0,
+      x1 = paste0(
+        current_year, '1231'
+      ) %>% ymd(),
+      y1 = user_rep_history %>% group_by(
+        DATE
+      ) %>% summarise(
+        REP = sum(REP)
+      ) %>% filter(
+        year(DATE) >= current_year - 1
+      ) %>% select(
+        REP
+      ) %>% pull() %>% max() * 1.1
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.1,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+```{r Top 5 user reputation battle, include = FALSE, warning = FALSE, message = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines',
+  data = user_rep_history_top10 %>% semi_join(
+    user_rep_history_top10 %>% filter(
+      year(DATE) == current_year
+    ) %>% group_by(
+      USERID
+    ) %>% summarise(
+      REP = sum(REP)
+    ) %>% ungroup() %>% arrange(
+      desc(REP)
+    ) %>% head(
+      5
+    ),
+    by = 'USERID'
+  ),
+  x = ~DATE,
+  y = ~REP,
+  color = ~USERID,
+  name = ~USERID
+) %>% add_lines(
+) %>% layout(
+  title = paste0(
+    'TEX.SE top 5 user reputation battle (',
+    current_year,
+    ')'
+  ),
+  x = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1)  # x-max
+    )
+  ),
+  y = list(
+    title = 'Reputation',
+    range = c(
+      0, # y-min
+      300 # y-max
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.1,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+# Comment statistics
+
+```{r Comment data, include = FALSE, warning = FALSE, message = FALSE}
+
+comment_data <- download_database(
+  database = 'Comments',
+  col_types = cols_only(
+    Id = col_integer(),
+    PostId = col_integer(),
+    Score = col_integer(),
+    CreationDate = col_character(),
+    UserId = col_integer()
+  )
+) %>% mutate(
+  CreationDate = CreationDate %>% as_datetime()
+)
+
+
+# Create comment data summary
+
+# Number of comments over time
+comment_data_summary <- comment_data %>% mutate(
+  CreationDate = CreationDate %>% as_date()
+) %>% left_join(
+  post_data %>% select(
+    Id,
+    PostTypeId
+  ) %>% rename(
+    PostId = Id
+  ),
+  by = 'PostId'
+) %>% group_by(
+  CreationDate
+) %>% count(
+  PostTypeId
+) %>% ungroup() %>% filter(
+  PostTypeId %in% c(1, 2)
+) %>% mutate(
+  PostType = if_else(
+    PostTypeId == 1,
+    'Questions',
+    'Answers'
+  )
+) %>% select(
+  -PostTypeId
+) %>% spread(
+  key = PostType,
+  value = n
+) %>% full_join(
+  comment_data %>% mutate(
+    CreationDate = CreationDate %>% as_date()
+  ) %>% filter(
+    !is.na(UserId)
+  ) %>% select(
+    CreationDate,
+    UserId
+  ) %>% unique() %>% count(
+    CreationDate
+  ) %>% rename(
+    UniqueUsers = n
+  ),
+  by = 'CreationDate'
+) %>% full_join(
+  data.frame(
+    CreationDate = seq(
+      from = comment_data$CreationDate %>% as_date() %>% min(
+        na.rm = TRUE
+      ),
+      to = comment_data$CreationDate %>% as_date() %>% max(
+        na.rm = TRUE
+      ),
+      by = 'day'
+    )
+  ),
+  by = 'CreationDate'
+) %>% arrange(
+  CreationDate
+) %>% mutate(
+  Total = (Questions %>% replace_na(0)) + (Answers %>% replace_na(0)),
+  QuestionsAvg = rollapply(
+    data = Questions %>% replace_na(0),
+    width = 7, # 1 week
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  ),
+  AnswersAvg = rollapply(
+    data = Answers %>% replace_na(0),
+    width = 7, # 1 week
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  ),
+  TotalAvg = rollapply(
+    data = Total %>% replace_na(0),
+    width = 7, # 1 week
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  ),
+  UniqueUsersAvg = rollapply(
+    data = UniqueUsers %>% replace_na(0),
+    width = 7, # 1 wee
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  )
+)
+
+# Comments by time-of-day
+comments_time_of_day <- comment_data %>% mutate(
+  Date = CreationDate %>% as_date %>% floor_date(
+    unit = 'year'
+  ),
+  Hour = CreationDate %>% str_sub(
+    start = 12L,
+    end = 13L
+  )
+) %>% left_join(
+  post_data %>% transmute(
+    PostId = Id,
+    PostType = PostTypeId
+  ),
+  by = 'PostId'
+) %>% filter(
+  PostType %in% c(1, 2) # Question or Answer
+) %>% group_by(
+  Date,
+  Hour
+) %>% count(
+  PostType
+) %>% ungroup() %>% mutate(
+  PostType = if_else(
+    PostType == 1,
+    'Question',
+    'Answer'
+  ),
+  Hour = if_else(
+    Hour %in% c(
+      '00', '23'
+    ),
+    paste0(
+      Hour,
+      '\n\'',
+      Date %>% str_sub(
+        start = 3L,
+        end = 4L
+      )
+    ),
+    Hour
+  )
+) %>% spread(
+  key = PostType,
+  value = n
+)
+
+
+```
+
+
+```{r Comment data chart, echo = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines',
+  data = comment_data_summary
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~Questions,
+  name = 'on Questions',
+  showlegend = FALSE,
+  line = list(
+    color = colour$question %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~Answers,
+  name = 'on Answers',
+  showlegend = FALSE,
+  line = list(
+    color = colour$answer %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~UniqueUsers,
+  name = 'by Unique users',
+  showlegend = FALSE,
+  line = list(
+    color = colour$user %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~QuestionsAvg,
+  name = 'on Questions (7-day avg)',
+  line = list(
+    color = colour$question,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~AnswersAvg,
+  name = 'on Answers (7-day avg)',
+  line = list(
+    color = colour$answer,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~UniqueUsersAvg,
+  name = 'by Unique users (7-day avg)',
+  line = list(
+    color = colour$user,
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    if (meta_site) 'TeX.Meta.SE' else 'TeX.SE',
+    ' comments by day (',
+    current_year,
+    ')'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1) # x-max
+    )
+  ),
+  yaxis = list(
+    title = '#',
+    range = c(
+      0, # y-min
+      max(
+        comment_data_summary %>% filter(
+          year(CreationDate) >= current_year - 1
+        ) %>% select(
+          Questions
+        ) %>% pull() %>% max(
+          na.rm = TRUE
+        ) * 1.1,
+        comment_data_summary %>% filter(
+          year(CreationDate) >= current_year - 1
+        ) %>% select(
+          Answers
+        ) %>% pull() %>% max(
+          na.rm = TRUE
+        ) * 1.1
+      ) # y-max
+    )
+  ),
+  shapes = list(
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y1 = max(
+        comment_data_summary %>% filter(
+          year(CreationDate) >= current_year - 1
+        ) %>% select(
+          Questions
+        ) %>% pull() %>% max(
+          na.rm = TRUE
+        ) * 1.1,
+        comment_data_summary %>% filter(
+          year(CreationDate) >= current_year - 1
+        ) %>% select(
+          Answers
+        ) %>% pull() %>% max(
+          na.rm = TRUE
+        ) * 1.1
+      ),
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    ),
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y1 = max(
+        comment_data_summary %>% filter(
+          year(CreationDate) >= current_year - 1
+        ) %>% select(
+          Questions
+        ) %>% pull() %>% max(
+          na.rm = TRUE
+        ) * 1.1,
+        comment_data_summary %>% filter(
+          year(CreationDate) >= current_year - 1
+        ) %>% select(
+          Answers
+        ) %>% pull() %>% max(
+          na.rm = TRUE
+        ) * 1.1
+      ),
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+```{r Comments by time-of-day, echo = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'line',
+  data = comments_time_of_day %>% filter(
+    year(Date) == current_year
+  ) %>% mutate(
+    num = row_number()
+  )
+) %>% add_lines(
+  x = ~num,
+  y = ~Question,
+  name = 'Questions',
+  line = list(
+    color = colour$question
+  )
+) %>% add_lines(
+  x = ~num,
+  y = ~Answer,
+  name = 'Answers',
+  line = list(
+    color = colour$answer
+  )
+) %>% layout(
+  title = paste0(
+    'TeX.SE comments by time-of-day (',
+    current_year,
+    ') [Hour (UTC)]'
+  ),
+  xaxis = list(
+    title = '',
+    tickmode = 'array',
+    tickvals = ~num,
+    ticktext = ~Hour,
+    tickangle = 0
+  ),
+  yaxis = list(
+    title = '#',
+    range = c(
+      0, # y-min
+      max(
+        comments_time_of_day$Question %>% max(
+          na.rm = TRUE
+        ),
+        comments_time_of_day$Answer %>% max(
+          na.rm = TRUE
+        )
+      ) * 1.1 # y-max
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+
+# Badge statistics
+
+```{r Badge data, include = FALSE, warning = FALSE, message = FALSE}
+
+badge_data <- download_database(
+  database = 'Badges',
+  datefield = 'Date',
+  col_types = cols_only(
+    Id = col_integer(),
+    UserId = col_integer(),
+    Name = col_character(),
+    Date = col_character(),
+    Class = col_integer(),
+    TagBased = col_logical()
+  )
+) %>% mutate(
+  Date = Date %>% as_datetime()
+)
+
+# Create badge data summary
+
+badge_data_summary <- badge_data %>% mutate(
+  Date = Date %>% as_date()
+) %>% group_by(
+  Date
+) %>% count(
+  Class
+) %>% ungroup() %>% spread(
+  key = Class,
+  value = n
+) %>% rename(
+  Gold = `1`,
+  Silver = `2`,
+  Bronze = `3`
+) %>% full_join(
+  # Ensure that all days are available in original data set
+  data.frame(
+    Date = seq(
+      from = badge_data$Date %>% as_date() %>% min(),
+      to = badge_data$Date %>% as_date() %>% max(),
+      by = 'month'
+    )
+  ),
+  by = 'Date'
+) %>% mutate(
+  Gold_Avg = rollapply(
+    data = Gold %>% replace_na(0),
+    width = 7,
+    fill = NA,
+    FUN = mean,
+    align = 'right'
+  ),
+  Silver_Avg = rollapply(
+    data = Silver %>% replace_na(0),
+    width = 7,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  ),
+  Bronze_Avg = rollapply(
+    data = Bronze %>% replace_na(0),
+    width = 7,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  )
+) %>% full_join(
+  badge_data %>% filter(
+    TagBased == FALSE
+  ) %>% left_join(
+    badge_types %>% select(
+      Name,
+      Type
+    ),
+    by = 'Name'
+  ) %>% mutate(
+    Date = Date %>% as_date()
+  ) %>% group_by(
+    Date
+  ) %>% count(
+    Type
+  ) %>% ungroup() %>% spread(
+    key = Type,
+    value = n
+  ) %>% full_join(
+    badge_data %>% filter(
+      TagBased == TRUE
+    ) %>% mutate(
+      Date = Date %>% as_date()
+    ) %>% count(
+      Date
+    ) %>% rename(
+      Tag = n
+    ),
+    by = 'Date'
+  ) %>% mutate(
+    Question_Avg = rollapply(
+      data = Question %>% replace_na(0),
+      width = 7,
+      FUN = mean,
+      fill = NA,
+      align = 'right'
+    ),
+    Answer_Avg = rollapply(
+      data = Answer %>% replace_na(0),
+      width = 7,
+      FUN = mean,
+      fill = NA,
+      align = 'right'
+    ),
+    Participation_Avg = rollapply(
+      data = Participation %>% replace_na(0),
+      width = 7,
+      FUN = mean,
+      fill = NA,
+      align = 'right'
+    ),
+    Moderation_Avg = rollapply(
+      data = Moderation %>% replace_na(0),
+      width = 7,
+      FUN = mean,
+      fill = NA,
+      align = 'right'
+    ),
+    Other_Avg = rollapply(
+      data = Other %>% replace_na(0),
+      width = 7,
+      FUN = mean,
+      fill = NA,
+      align = 'right'
+    ),
+    Tag_Avg = rollapply(
+      data = Tag %>% replace_na(0),
+      width = 7,
+      FUN = mean,
+      fill = NA,
+      align = 'right'
+    )
+  ),
+  by = 'Date'
+)
+
+```
+
+
+```{r Badge data chart, echo = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines',
+  data = badge_data_summary
+) %>% add_lines(
+  x = ~Date,
+  y = ~Bronze,
+  name = 'Bronze',
+  showlegend = FALSE,
+  line = list(
+    color = colour$bronze %>% alpha(0.2),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Silver,
+  name = 'Silver',
+  showlegend = FALSE,
+  line = list(
+    color = colour$silver %>% alpha(0.2),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Gold,
+  name = 'Gold',
+  showlegend = FALSE,
+  line = list(
+    color = colour$gold %>% alpha(0.2),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Bronze_Avg,
+  name = 'Bronze (7-day avg)',
+  line = list(
+    color = colour$bronze,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Silver_Avg,
+  name = 'Silver (7-day avg)',
+  line = list(
+    color = colour$silver,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Gold_Avg,
+  name = 'Gold (7-day avg)',
+  line = list(
+    color = colour$gold,
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    'TeX.SE total badges awarded by class (',
+    current_year,
+    ')'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1) # x-max
+    )
+  ),
+  yaxis = list(
+    title = '#',
+    type = 'log',
+    range = c(
+      0, # y-min (10^0 = 1),
+      (badge_data_summary$Bronze %>% tail(
+        12 * 2 # Use last 2 years
+      ) %>% max(
+        na.rm = TRUE
+      ) * 1.1) %>% log10() # y-max (10^x)
+    )
+  ),
+  shapes = list(
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y1 = (badge_data_summary$Bronze %>% tail(
+        12 * 2 # Use last 2 years
+      ) %>% max(
+        na.rm = TRUE
+      ) * 1.1),
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    ),
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y1 = (badge_data_summary$Bronze %>% tail(
+        12 * 2 # Use last 2 years
+      ) %>% max(
+        na.rm = TRUE
+      ) * 1.1),
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+```{r Badges by type, echo = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines',
+  data = badge_data_summary
+) %>% add_lines(
+  x = ~Date,
+  y = ~Question,
+  name = 'Question',
+  showlegend = FALSE,
+  line = list(
+    color = colour$question %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Answer,
+  name = 'Answer',
+  showlegend = FALSE,
+  line = list(
+    color = colour$answer %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Participation,
+  name = 'Participation',
+  showlegend = FALSE,
+  line = list(
+    color = colour$participation %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Moderation,
+  name = 'Moderation',
+  showlegend = FALSE,
+  line = list(
+    color = colour$moderation %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Other,
+  name = 'Other',
+  showlegend = FALSE,
+  line = list(
+    color = colour$other %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Tag,
+  name = 'Tag',
+  showlegend = FALSE,
+  line = list(
+    color = colour$tag %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Question_Avg,
+  name = 'Question',
+  line = list(
+    color = colour$question,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Answer_Avg,
+  name = 'Answer',
+  line = list(
+    color = colour$answer,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Participation_Avg,
+  name = 'Participation',
+  line = list(
+    color = colour$participation,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Moderation_Avg,
+  name = 'Moderation',
+  line = list(
+    color = colour$moderation,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Other_Avg,
+  name = 'Other',
+  line = list(
+    color = colour$other,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~Tag_Avg,
+  name = 'Tag',
+  line = list(
+    color = colour$tag,
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    'TeX.SE badges awarded by type (',
+    current_year,
+    ')'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1)  # x-max
+    )
+  ),
+  yaxis = list(
+    title = '#',
+    range = c(
+      0, # y-min
+      badge_data_summary$Question %>% tail(
+        12 * 2 # Use last 2 years
+      ) %>% max(
+        na.rm = TRUE
+      ) * 1.1 # y-max
+    )
+  ),
+  shapes = list(
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y1 = badge_data_summary$Question %>% tail(
+        12 * 2 # Use last 2 years
+      ) %>% max(
+        na.rm = TRUE
+      ) * 1.1,
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    ),
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y1 = badge_data_summary$Question %>% tail(
+        12 * 2 # Use last 2 years
+      ) %>% max(
+        na.rm = TRUE
+      ) * 1.1,
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+
+```
+
+
+```{r Top 5 badges, echo = FALSE}
+
+top_5_badges <- badge_data %>% filter(
+  year(Date) == current_year,
+  TagBased == FALSE
+) %>% count(
+  Name
+) %>% arrange(
+  desc(n)
+) %>% slice(
+  1:5
+) %>% mutate(
+  rank = row_number()
+)
+
+top_5_badges_summary <- badge_data %>% filter(
+  Name %in% top_5_badges$Name,
+  TagBased == FALSE
+) %>% left_join(
+  top_5_badges,
+  by = 'Name'
+) %>% mutate(
+  Date = Date %>% as_date(),
+  n = 1
+) %>% group_by(
+  Date,
+  rank
+) %>% summarise(
+  n = n %>% sum(
+    na.rm = TRUE
+  )
+) %>% ungroup() %>% spread(
+  key = rank,
+  value = n
+) %>% mutate(
+  `1_Avg` = rollapply(
+    data = `1` %>% replace_na(0),
+    width = 14,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  ),
+  `2_Avg` = rollapply(
+    data = `2` %>% replace_na(0),
+    width = 14,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  ),
+  `3_Avg` = rollapply(
+    data = `3` %>% replace_na(0),
+    width = 14,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  ),
+  `4_Avg` = rollapply(
+    data = `4` %>% replace_na(0),
+    width = 14,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  ),
+  `5_Avg` = rollapply(
+    data = `5` %>% replace_na(0),
+    width = 14,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  )
+)
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines',
+  data = top_5_badges_summary
+) %>% add_lines(
+  x = ~Date,
+  y = ~`1`,
+  name = top_5_badges$Name[top_5_badges$rank == 1],
+  showlegend = FALSE,
+  line = list(
+    color = colour$top_5_1 %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~`2`,
+  name = top_5_badges$Name[top_5_badges$rank == 2],
+  showlegend = FALSE,
+  line = list(
+    color = colour$top_5_2 %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~`3`,
+  name = top_5_badges$Name[top_5_badges$rank == 3],
+  showlegend = FALSE,
+  line = list(
+    color = colour$top_5_3 %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~`4`,
+  name = top_5_badges$Name[top_5_badges$rank == 4],
+  showlegend = FALSE,
+  line = list(
+    color = colour$top_5_4 %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~`5`,
+  name = top_5_badges$Name[top_5_badges$rank == 5],
+  showlegend = FALSE,
+  line = list(
+    color = colour$top_5_5 %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~`1_Avg`,
+  name = top_5_badges$Name[top_5_badges$rank == 1],
+  line = list(
+    color = colour$top_5_1,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~`2_Avg`,
+  name = top_5_badges$Name[top_5_badges$rank == 2],
+  line = list(
+    color = colour$top_5_2,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~`3_Avg`,
+  name = top_5_badges$Name[top_5_badges$rank == 3],
+  line = list(
+    color = colour$top_5_3,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~`4_Avg`,
+  name = top_5_badges$Name[top_5_badges$rank == 4],
+  line = list(
+    color = colour$top_5_4,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~Date,
+  y = ~`5_Avg`,
+  name = top_5_badges$Name[top_5_badges$rank == 5],
+  line = list(
+    color = colour$top_5_5,
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    'TeX.SE top 5 badges (',
+    current_year,
+    ')'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1)  # x-max
+    )
+  ),
+  yaxis = list(
+    title = '#',
+    range = c(
+      0, # y-min
+      top_5_badges_summary$`1` %>% tail(
+        12 * 2 # Use only last 2 years
+      ) %>% max(
+        na.rm = TRUE
+      ) * 1.1 # y-max
+    )
+  ),
+  shapes = list(
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y1 = max(
+        top_5_badges_summary$`1` %>% tail(
+          12 * 2 # Use last 2 years
+        ) %>% max(
+          na.rm = TRUE
+        ) * 1.1,
+        top_5_badges_summary$`1` %>% tail(
+          12 * 2 # Use last 2 years
+        ) %>% max(
+          na.rm = TRUE
+        ) * 1.1
+      ),
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    ),
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y1 = max(
+        top_5_badges_summary$`1` %>% tail(
+          12 * 2 # Use last 2 years
+        ) %>% max(
+          na.rm = TRUE
+        ) * 1.1,
+        top_5_badges_summary$`1` %>% tail(
+          12 * 2 # Use last 2 years
+        ) %>% max(
+          na.rm = TRUE
+        ) * 1.1
+      ),
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+
+# Post feedback statistics
+
+```{r Post feedback data, include = FALSE, warning = FALSE, message = FALSE}
+
+post_feedback_data <- download_database(
+  database = 'PostFeedback',
+  col_types = cols_only(
+    Id = col_integer(),
+    PostId = col_integer(),
+    IsAnonymous = col_logical(),
+    VoteTypeId = col_integer(),
+    CreationDate = col_character()
+  )
+) %>% mutate(
+  CreationDate = CreationDate %>% as_datetime()
+)
+
+# Create post_feedback data summary
+
+```
+
+
+
+
+# Vote statistics
+
+```{r Vote data, include = FALSE, warning = FALSE, message = FALSE}
+
+vote_data <- download_database(
+  database = 'Votes',
+  col_types = cols_only(
+    Id = col_integer(),
+    PostId = col_integer(),
+    VoteTypeId = col_integer(),
+    UserId = col_integer(),
+    CreationDate = col_character(),
+    BountyAmount = col_integer()
+  )
+) %>% mutate(
+  CreationDate = CreationDate %>% as_date()
+)
+
+
+# Create vote data summary
+
+vote_data_summary <- vote_data %>% bind_rows(
+  # Add post feedback to voting data
+  post_feedback_data %>% select(
+    -IsAnonymous
+  ) %>% mutate(
+    CreationDate = CreationDate %>% as_date(),
+    UserId = NULL,
+    BountyAmount = NULL
+  )
+) %>% filter(
+  VoteTypeId %in% c(
+    2, # UpMod
+    3  # DownMod
+  )
+) %>% inner_join(
+  post_data %>% transmute(
+    PostId = Id,
+    PostTypeId = PostTypeId
+  ),
+  by = 'PostId'
+) %>% filter(
+  PostTypeId %in% c(
+    1, # Question
+    2  # Answer
+  )
+) %>% mutate(
+  PostTypeId = case_when(
+    PostTypeId == 1 ~ 'Question',
+    PostTypeId == 2 ~ 'Answer'
+  ),
+  VoteTypeId = case_when(
+    VoteTypeId == 2 ~ 'UpMod',
+    VoteTypeId == 3 ~ 'DownMod'
+  )
+) %>% count(
+  CreationDate,
+  PostTypeId,
+  VoteTypeId
+) %>% spread(
+  key = VoteTypeId,
+  value = n
+) %>% ungroup()
+
+vote_data_summary <- vote_data_summary %>% bind_rows(
+  vote_data_summary %>% group_by(
+    CreationDate
+  ) %>% summarise(
+    DownMod = DownMod %>% sum(
+      na.rm = TRUE
+    ),
+    UpMod = UpMod %>% sum(
+      na.rm = TRUE
+    )
+  ) %>% ungroup() %>% mutate(
+    PostTypeId = 'Total'
+  )
+) %>% group_by(
+  PostTypeId
+) %>% mutate(
+  UpMod_Avg = rollapply(
+    data = UpMod %>% replace_na(0),
+    width = 7,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  ),
+  DownMod_Avg = rollapply(
+    data = DownMod %>% replace_na(0),
+    width = 7,
+    FUN = mean,
+    fill = NA,
+    align = 'right'
+  )
+) %>% ungroup() %>% arrange(
+  CreationDate,
+  PostTypeId
+)
+
+```
+
+
+```{r Vote data chart, echo = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines'
+) %>% add_lines(
+  data = vote_data_summary %>% filter(
+    PostTypeId == 'Question'
+  ),
+  x = ~CreationDate,
+  y = ~UpMod,
+  name = 'Question up-vote',
+  showlegend = FALSE,
+  line = list(
+    color = colour$question %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  data = vote_data_summary %>% filter(
+    PostTypeId == 'Answer'
+  ),
+  x = ~CreationDate,
+  y = ~UpMod,
+  name = 'Answer up-vote',
+  showlegend = FALSE,
+  line = list(
+    color = colour$answer %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  data = vote_data_summary %>% filter(
+    PostTypeId == 'Total'
+  ),
+  x = ~CreationDate,
+  y = ~DownMod,
+  name = 'All posts down-vote',
+  showlegend = FALSE,
+  line = list(
+    color = colour$green %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  data = vote_data_summary %>% filter(
+    PostTypeId == 'Question'
+  ),
+  x = ~CreationDate,
+  y = ~UpMod_Avg,
+  name = 'Question up-vote',
+  line = list(
+    color = colour$question,
+    width = 2
+  )
+) %>% add_lines(
+  data = vote_data_summary %>% filter(
+    PostTypeId == 'Answer'
+  ),
+  x = ~CreationDate,
+  y = ~UpMod_Avg,
+  name = 'Answer up-vote',
+  line = list(
+    color = colour$answer,
+    width = 2
+  )
+) %>% add_lines(
+  data = vote_data_summary %>% filter(
+    PostTypeId == 'Total'
+  ),
+  x = ~CreationDate,
+  y = ~DownMod_Avg,
+  name = 'All posts down-vote',
+  line = list(
+    color = mix_colour(
+      mix = 0.8,
+      colour$green,
+      rgb(0, 0, 0) # black
+    ),
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    'TeX.SE voting (',
+    current_year,
+    ')'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1)  # x-max
+    )
+  ),
+  yaxis = list(
+    title = '#',
+    range = c(
+      0, # y-min,
+      vote_data_summary %>% filter(
+        year(CreationDate) >= current_year - 3,
+        PostTypeId %in% c(
+          'Question',
+          'Answer'
+        )
+      ) %>% select(
+        UpMod_Avg
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1 # y-max
+    )
+  ),
+  shapes = list(
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y1 = vote_data_summary %>% filter(
+        year(CreationDate) >= current_year - 3,
+        PostTypeId %in% c(
+          'Question',
+          'Answer'
+        )
+      ) %>% select(
+        UpMod_Avg
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1,
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    ),
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y1 = vote_data_summary %>% filter(
+        year(CreationDate) >= current_year - 3,
+        PostTypeId %in% c(
+          'Question',
+          'Answer'
+        )
+      ) %>% select(
+        UpMod_Avg
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1,
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+
+
+
+# Review statistics
+
+```{r Review data, include = FALSE, warning = FALSE, message = FALSE}
+
+review_task_results <- download_database(
+  database = 'ReviewTaskResults',
+  col_types = cols_only(
+    Id = col_integer(),
+    ReviewTaskId = col_integer(),
+    ReviewTaskResultTypeId = col_integer(),
+    CreationDate = col_character(),
+    RejectionReasonId = col_integer()
+  )
+) %>% mutate(
+  CreationDate = CreationDate %>% as_datetime()
+)
+review_tasks <- download_database(
+  database = 'ReviewTasks',
+  col_types = cols_only(
+    Id = col_integer(),
+    ReviewTaskTypeId = col_integer(),
+    CreationDate = col_character(),
+    DeletionDate = col_character(),
+    ReviewTaskStateId = col_integer(),
+    PostId = col_integer(),
+    SuggestedEditId = col_integer(),
+    CompletedByReviewTaskId = col_integer()
+  )
+) %>% mutate(
+  CreationDate = CreationDate %>% as_datetime(),
+  DeletionDate = DeletionDate %>% as_datetime()
+)
+suggested_edits <- download_database(
+  database = 'SuggestedEdits',
+  col_types = cols_only(
+    Id = col_integer(),
+    PostId = col_integer(),
+    CreationDate = col_character(),
+    ApprovalDate = col_character(),
+    RejectionDate = col_character(),
+    OwnerUserId = col_integer(),
+    Comment = col_character(),
+    Title = col_character(), # If title was changed
+    Tags = col_character() # If tags were changed/added
+  )
+) %>% mutate(
+  CreationDate = CreationDate %>% as_datetime(),
+  ApprovalDate = ApprovalDate %>% as_datetime(),
+  RejectionDate = RejectionDate %>% as_datetime()
+)
+suggested_edit_votes <- download_database(
+  database = 'SuggestedEditVotes',
+  col_types = cols_only(
+    Id = col_integer(),
+    SuggestedEditId = col_integer(),
+    UserId = col_integer(),
+    VoteTypeId = col_integer(),
+    CreationDate = col_character(),
+    TargetUserId = col_integer(),
+    TargetRepChange = col_integer()
+  )
+) %>% mutate(
+  CreationDate = CreationDate %>% as_datetime()
+)
+
+
+
+review_rejection_reasons <- download_entire_database(
+  database = 'ReviewRejectionReasons',
+  col_types = cols_only(
+    Id = col_integer(),
+    Name = col_character()
+  )
+)
+
+review_task_types <- download_entire_database(
+  database = 'ReviewTaskTypes',
+  col_types = cols_only(
+    Id = col_integer(),
+    Name = col_character()
+  )
+)
+
+# Create review summary
+
+review_data_summary <- review_tasks %>% filter(
+  ReviewTaskTypeId %in% 1:6
+) %>% group_by(
+  ReviewTaskTypeId
+) %>% count(
+  CreationDate
+) %>% ungroup() %>% left_join(
+  review_task_types %>% rename(
+    ReviewTaskTypeId = Id
+  )
+) %>% select(
+  -ReviewTaskTypeId
+) %>% spread(
+  key = Name,
+  value = n
+) %>% full_join(
+  data.frame(
+    CreationDate = seq(
+      from = review_tasks$CreationDate %>% min(),
+      to = review_tasks$CreationDate %>% max(),
+      by = 'day'
+    )
+  ),
+  by = 'CreationDate'
+) %>% arrange(
+  CreationDate
+) %>% mutate_at(
+  .vars = vars(-CreationDate),
+  .funs = funs(
+    mean = rollapply(
+      data = . %>% replace_na(0),
+      width = 7,
+      FUN = mean,
+      fill = NA,
+      align = 'right'
+    )
+  )
+)
+
+```
+
+
+Counts of reviews for `r current_year` were all lower than the previous year:
+
+```{r Trends in reviews, echo = FALSE}
+
+review_data_summary %>% mutate(
+  Year = CreationDate %>% year()
+) %>% group_by(
+  Year
+) %>% summarise(
+  `Close Votes` = sum(
+    `Close Votes` %>% replace_na(0)
+  ) %>% comma(digits = 0L),
+  `Reopen Votes` = sum(
+    `Reopen Vote` %>% replace_na(0)
+  ) %>% comma(digits = 0L),
+  `Low Quality Posts` = sum(
+    `Low Quality Posts` %>% replace_na(0)
+  ) %>% comma(digits = 0L),
+  `Suggested Edits` = sum(
+    `Suggested Edit` %>% replace_na(0)
+  ) %>% comma(digits = 0L),
+  `First Posts` = sum(
+    `First Post` %>% replace_na(0)
+  ) %>% comma(digits = 0L),
+  `Late Answers` = sum(
+    `Late Answer` %>% replace_na(0)
+  ) %>% comma(digits = 0L)
+) %>% ungroup() %>% filter(
+  Year > 2011
+) %>% arrange(
+  desc(Year)
+) %>% kable() %>% kable_styling(
+  bootstrap_options = c(
+    'striped', 
+    'hover',
+    'responsive'
+  ),
+  full_width = FALSE
+)
+
+```
+
+
+```{r Review statistics chart, include = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines',
+  data = review_data_summary
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`Close Votes`,
+  name = 'Close Votes',
+  showlegend = FALSE,
+  line = list(
+    color = colour$close_votes %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`Reopen Vote`,
+  name = 'Reopen Votes',
+  showlegend = FALSE,
+  line = list(
+    color = colour$reopen_votes %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`Low Quality Posts`,
+  name = 'Low Quality Posts',
+  showlegend = FALSE,
+  line = list(
+    color = colour$low_quality_posts %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`Suggested Edit`,
+  name = 'Suggested Edits',
+  showlegend = FALSE,
+  line = list(
+    color = colour$suggested_edits %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`First Post`,
+  name = 'First Posts',
+  showlegend = FALSE,
+  line = list(
+    color = colour$first_posts %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`Late Answer`,
+  name = 'Late Answers',
+  showlegend = FALSE,
+  line = list(
+    color = colour$late_answers %>% alpha(0.1),
+    width = 1
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`Close Votes_mean`,
+  name = 'Close Votes',
+  line = list(
+    color = colour$close_votes,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`Reopen Vote_mean`,
+  name = 'Reopen Votes',
+  line = list(
+    color = colour$reopen_votes,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`Low Quality Posts_mean`,
+  name = 'Low Quality Posts',
+  line = list(
+    color = colour$low_quality_posts,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`Suggested Edit_mean`,
+  name = 'Suggested Edits',
+  line = list(
+    color = colour$suggested_edits,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`First Post_mean`,
+  name = 'First Posts',
+  line = list(
+    color = colour$first_posts,
+    width = 2
+  )
+) %>% add_lines(
+  x = ~CreationDate,
+  y = ~`Late Answer_mean`,
+  name = 'Late Answers',
+  line = list(
+    color = colour$late_answers,
+    width = 2
+  )
+) %>% layout(
+  title = paste0(
+    'TeX.SE reviews (',
+    current_year,
+    ') (7-day average)'
+  ),
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1)  # x-max
+    )
+  ),
+  yaxis = list(
+    title = '#',
+    range = c(
+      0, # y-min,
+      review_data_summary %>% filter(
+        year(CreationDate) == current_year
+      ) %>% select(
+        `First Post_mean`
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1 # y-max
+    )
+  ),
+  shapes = list(
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '0101'
+      ) %>% ymd(), # Start of year
+      y1 = review_data_summary %>% filter(
+        year(CreationDate) == current_year
+      ) %>% select(
+        `First Post_mean`
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1,
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    ),
+    list(
+      type = 'line',
+      x0 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y0 = 0,
+      x1 = paste0(
+        current_year, '1231'
+      ) %>% ymd(), # End of year
+      y1 = review_data_summary %>% filter(
+        year(CreationDate) == current_year
+      ) %>% select(
+        `First Post_mean`
+      ) %>% pull() %>% max(
+        na.rm = TRUE
+      ) * 1.1,
+      line = list(
+        color = 'black' %>% alpha(0.3),
+        width = 2
+      )
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.05,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
+
+Most reviews are under the First Posts review queue with an annual average of `r review_data_summary %>% filter(year(CreationDate) == current_year) %>% select(contains('First Post')) %>% pull() %>% mean(na.rm = TRUE) %>% comma(digits = 1L)` reviews per day.
+
+```{r Annual average reviews, echo = FALSE}
+
+review_data_summary %>% mutate(
+  Year = CreationDate %>% year()
+) %>% group_by(
+  Year
+) %>% summarise(
+  `Close Votes` = mean(
+    `Close Votes`, na.rm = TRUE
+  ) %>% comma(digits = 1L),
+  `Reopen Votes` = mean(
+    `Reopen Vote`, na.rm = TRUE
+  ) %>% comma(digits = 1L),
+  `Low Quality Posts` = mean(
+    `Low Quality Posts`, na.rm = TRUE
+  ) %>% comma(digits = 1L),
+  `Suggested Edits` = mean(
+    `Suggested Edit`, na.rm = TRUE
+  ) %>% comma(digits = 1L),
+  `First Posts` = mean(
+    `First Post`, na.rm = TRUE
+  ) %>% comma(digits = 1L),
+  `Late Answers` = mean(
+    `Late Answer`, na.rm = TRUE
+  ) %>% comma(digits = 1L)
+) %>% ungroup() %>% arrange(
+  desc(Year)
+) %>% filter(
+  Year > 2011 # Historical data is blank
+) %>% kable() %>% kable_styling(
+  bootstrap_options = c(
+    'striped', 
+    'hover',
+    'responsive'
+  ),
+  full_width = FALSE
+)
+
+```
+
+
+# Reputation statistics
+
+```{r Read reputation data, include = FALSE, warning = FALSE, message = FALSE}
+
+reputation_history <- read_csv(
+  file = paste0(
+    base_folder,
+    '/Data/',
+    'tex_reputation_history.csv'
+  ),
+  progress = FALSE,
+  col_types = cols()
+)
+
+# Create reputation summary
+
+reputation_summary <- reputation_history %>% group_by(
+  DATE
+) %>% summarise(
+  REP_SUM = REP %>% sum(),
+  REP_AVG = REP %>% mean(),
+  REP_MEDIAN = REP %>% median(),
+  REP_MAX = REP %>% max(),
+  REP_MIN = REP %>% min()
+) %>% ungroup()
+
+```
+
+A total of `r reputation_history %>% filter(year(DATE) == current_year) %>% pull(REP) %>% sum() %>% comma(digits = 0L)` reputation was earned during `r current_year`. This includes the starting reputation of&nbsp;1, association bonuses, up-votes and down-votes, suggested edit bonuses, bounties, all of it. On average, rep-earning users earned `r reputation_summary %>% filter(year(DATE) == current_year) %>% pull(REP_AVG) %>% mean() %>% comma(digits = 1L)` reputation per day.
+
+```{r Annual reputation summary table, include = FALSE}
+
+reputation_history %>% filter(
+  year(DATE) > 2010
+) %>% mutate(
+  Year = DATE %>% year()
+) %>% group_by(
+  Year
+) %>% summarise(
+  Total = REP %>% sum() %>% comma(digits = 0L)
+) %>% left_join(
+  year_stats %>% mutate(
+    Year = Date %>% year()
+  ) %>% select(
+    Year,
+    Days
+  ),
+  by = 'Year'
+) %>% mutate(
+  `Daily average` = (Total / Days) %>% comma(digits = 1L)
+) %>% select(
+  -Days
+) %>% arrange(
+  desc(Year)
+) %>% kable() %>% kable_styling(
+  bootstrap_options = c(
+    'striped', 
+    'hover',
+    'responsive'
+  ),
+  full_width = FALSE
+) %>% add_header_above(
+  c(
+    ' ' = 1, # Year
+    'Reputation' = 2
+  )
+)
+
+```
+
+
+
+```{r Plot reputation, include = FALSE}
+
+plot_ly(
+  type = 'scatter',
+  mode = 'lines',
+  data = reputation_summary
+) %>% add_lines(
+  x = ~DATE,
+  y = ~REP_SUM
+) %>% layout(
+  xaxis = list(
+    title = '',
+    range = c(
+      paste0(
+        current_year, '0101'
+      ) %>% ymd() - weeks(1), # x-min
+      paste0(
+        current_year, '1231'
+      ) %>% ymd() + weeks(1)  # x-max
+    )
+  ),
+  legend = list(
+    x = 0.5,
+    xanchor = 'center',
+    y = -0.1,
+    yanchor = 'top',
+    orientation = 'h'
+  )
+)
+
+```
